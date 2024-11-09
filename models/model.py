@@ -370,7 +370,7 @@ class Final_Model(nn.Module):
         loss_recon = torch.sum(min_distances) / distances.shape[0]
         return loss_recon
 
-    def get_trajectory(self, traj_norm, neis, mask):
+    def get_trajectory(self, traj_norm, neis, mask, c_pred_len):
         predictions = torch.Tensor().cuda()
 
         # 对输入轨迹进行编码
@@ -403,7 +403,7 @@ class Final_Model(nn.Module):
         # generate N=20 future trajectories
         for i in range(self.config.goal_num):
             fut_token = repeat(
-                self.rand_token[:, :-1], "() n d -> b n d", b=traj_norm.size(0)
+                self.rand_token[:, :c_pred_len], "() n d -> b n d", b=traj_norm.size(0)
             )
 
             fut_feat = self.token_encoder(fut_token)
@@ -415,7 +415,7 @@ class Final_Model(nn.Module):
             prediction_feat = self.AR_Model(traj_feat, mask_type="all")
 
             mid_prediction = self.traj_decoder(
-                prediction_feat[:, self.past_len:-1])  # (512, 11, 2)
+                prediction_feat[:, self.past_len:self.past_len+c_pred_len])  # (512, 11, 2)
             des_prediction = self.traj_decoder_20(
                 prediction_feat[:, -1]
             ) + pred_des[:, i]

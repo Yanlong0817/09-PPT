@@ -155,8 +155,8 @@ class Trainer:
         pred_len = 1
         for c_pred_len in range(pred_len, self.config.future_len):
             if c_pred_len > 1:
-                # model_path = os.path.join(self.folder_test, f'model_{c_pred_len-1}.ckpt')
-                # self.model = torch.load(model_path, map_location=self.device)
+                model_path = os.path.join(self.folder_test, f'model_{c_pred_len-1}.ckpt')
+                self.model = torch.load(model_path, map_location=self.device)
                 # 优化器
                 self.opt = torch.optim.Adam(
                     self.model.parameters(), lr=self.config.learning_rate
@@ -183,10 +183,11 @@ class Trainer:
                 self.scheduler.step()
 
                 # validation
-                if (epoch + 1) % 1 == 0 and c_pred_len == self.config.future_len-1:
+                # if (epoch + 1) % 1 == 0 and c_pred_len == self.config.future_len-1:
+                if (epoch + 1) % 1 == 0:
                     self.model.eval()
                     fde_, currentValue = evaluate_trajectory(
-                        self.val_loader, self.model, self.config, self.device
+                        self.val_loader, self.model, self.config, self.device, c_pred_len
                     )
                     self.tb_writer.add_scalar("train/val", currentValue, epoch)
 

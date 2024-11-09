@@ -1,7 +1,7 @@
 import torch
 from models.model import Final_Model
 
-def evaluate_trajectory(dataset, model: Final_Model, config, device):
+def evaluate_trajectory(dataset, model: Final_Model, config, device, c_pred_len):
     # for the fulfillment stage or trajectory stage, we should have a fixed past/intention memory bank.
     ade_48s = fde_48s = 0
     samples = 0
@@ -20,12 +20,14 @@ def evaluate_trajectory(dataset, model: Final_Model, config, device):
                 ped[:, :, 1] = ped[:, :, 1] * config.data_scaling[1]
 
             traj_norm = ped
-            output = model.get_trajectory(traj_norm, neis, mask)
+            output = model.get_trajectory(traj_norm, neis, mask, c_pred_len)
             output = output.data
             # print(output.shape)
 
-            future_rep = traj_norm[:, 8:, :].unsqueeze(1).repeat(1, config.goal_num, 1, 1)
-            distances = torch.norm(output - future_rep, dim=3)
+            future_rep = traj_norm[:, 8:8+c_pred_len, :].unsqueeze(1).repeat(1, config.goal_num, 1, 1)
+            future_goal = traj_norm[:, -1:, :].unsqueeze(1).repeat(1, config.goal_num, 1, 1)
+            future = torch.cat((future_rep, future_goal), dim=2)
+            distances = torch.norm(output - future, dim=3)
 
             fde_mean_distances = torch.mean(distances[:, :, -1:], dim=2) # find the tarjectory according to the last frame's distance
             fde_index_min = torch.argmin(fde_mean_distances, dim=1)
