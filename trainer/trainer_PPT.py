@@ -97,6 +97,7 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.opt, T_max=config.max_epochs, eta_min=config.learning_rate_min
         )
+        self.criterion = nn.SmoothL1Loss()
 
         if config.cuda:
             self.model = self.model.cuda()
@@ -153,14 +154,14 @@ class Trainer:
     def fit(self):
         self.print_model_param(self.model)  # 打印模型参数
         pred_len = 1
-        for c_pred_len in range(11, self.config.future_len):
-            # if c_pred_len > 1:
-            #     model_path = os.path.join(self.folder_test, f'model_{c_pred_len-1}.ckpt')
-            #     self.model = torch.load(model_path, map_location=self.device)
-            #     # 优化器
-            #     self.opt = torch.optim.Adam(
-            #         self.model.parameters(), lr=self.config.learning_rate
-            #     )
+        for c_pred_len in range(pred_len, self.config.future_len):
+            if c_pred_len > 1:
+                model_path = os.path.join(self.folder_test, f'model_{c_pred_len-1}.ckpt')
+                self.model = torch.load(model_path, map_location=self.device)
+                # 优化器
+                self.opt = torch.optim.Adam(
+                    self.model.parameters(), lr=self.config.learning_rate
+                )
             # 余弦退火
             # self.scheduler = torch.optim.lr_scheduler.MultiStepLR(
             #     self.opt, milestones=[30, 80], gamma=0.1
@@ -355,7 +356,7 @@ class Trainer:
             traj_gt = traj_norm[:, pred_frame_id[0]:pred_frame_id[-1]+1]  # 中间轨迹
             traj_gt = torch.cat((traj_gt, traj_norm[:, -1].unsqueeze(1)), 1)  # 加上终点
 
-            loss += self.L2_Loss(pred_results, traj_gt)
+            loss += self.criterion(pred_results, traj_gt)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
