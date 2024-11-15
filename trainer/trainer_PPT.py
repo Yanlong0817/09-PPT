@@ -97,7 +97,7 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.opt, T_max=config.max_epochs, eta_min=config.learning_rate_min
         )
-        self.criterion = nn.SmoothL1Loss()
+        self.criterion = nn.MSELoss()
 
         if config.cuda:
             self.model = self.model.cuda()
@@ -153,66 +153,47 @@ class Trainer:
 
     def fit(self):
         self.print_model_param(self.model)  # 打印模型参数
-        pred_len = 1
-        for c_pred_len in range(11, self.config.future_len):
-            # if c_pred_len > 1:
-            #     model_path = os.path.join(self.folder_test, f'model_{c_pred_len-1}.ckpt')
-            #     self.model = torch.load(model_path, map_location=self.device)
-            #     # 优化器
-            #     self.opt = torch.optim.Adam(
-            #         self.model.parameters(), lr=self.config.learning_rate
-            #     )
-            # 余弦退火
-            # self.scheduler = torch.optim.lr_scheduler.MultiStepLR(
-            #     self.opt, milestones=[30, 80], gamma=0.1
-            # )
-            # self.scheduler = torch.optim.lr_scheduler.StepLR(
-            #     self.opt, step_size=30, gamma=0.1
-            # )
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.opt, T_max=self.config.max_epochs, eta_min=self.config.learning_rate_min
-            )
-            minValue = 200
-            minADE = 2000
-            minFDE = 2000
-            for epoch in range(self.start_epoch, self.config.max_epochs):
-                self.logger.info(" ----- Pred_len: {} Epoch: {}".format(c_pred_len, epoch))
-                loss = self._train_single_epoch(epoch, c_pred_len)
-                self.logger.info("Loss: {}".format(loss))
-                self.tb_writer.add_scalar("train/loss", loss, epoch)
+        minValue = 200
+        minADE = 2000
+        minFDE = 2000
+        for epoch in range(self.start_epoch, self.config.max_epochs):
+            self.logger.info(" ----- Epoch: {}".format(epoch))
+            loss = self._train_single_epoch(epoch)
+            self.logger.info("Loss: {}".format(loss))
+            self.tb_writer.add_scalar("train/loss", loss, epoch)
 
-                self.scheduler.step()
+            self.scheduler.step()
 
-                # validation
-                # if (epoch + 1) % 1 == 0 and c_pred_len == self.config.future_len-1:
-                if (epoch + 1) % 1 == 0:
-                    self.model.eval()
-                    fde_, currentValue = evaluate_trajectory(
-                        self.val_loader, self.model, self.config, self.device, c_pred_len
-                    )
-                    self.tb_writer.add_scalar("train/val", currentValue, epoch)
+            # validation
+            # if (epoch + 1) % 1 == 0 and c_pred_len == self.config.future_len-1:
+            if (epoch + 1) % 1 == 0:
+                self.model.eval()
+                fde_, currentValue = evaluate_trajectory(
+                    self.val_loader, self.model, self.config, self.device
+                )
+                self.tb_writer.add_scalar("train/val", currentValue, epoch)
 
-                    if 3 * currentValue + fde_ < minValue:
-                        minValue = 3 * currentValue + fde_
-                        minFDE = fde_.item()
-                        minADE = currentValue.item()
-                        self.logger.info("min ADE value: {}".format(minADE))
-                        self.logger.info("min FDE value: {}".format(minFDE))
-                        torch.save(self.model, self.folder_test + f'model_{c_pred_len}.ckpt')
+                if 3 * currentValue + fde_ < minValue:
+                    minValue = 3 * currentValue + fde_
+                    minFDE = fde_.item()
+                    minADE = currentValue.item()
+                    self.logger.info("min ADE value: {}".format(minADE))
+                    self.logger.info("min FDE value: {}".format(minFDE))
+                    torch.save(self.model, self.folder_test + f'model.ckpt')
 
-                    if self.config.use_wandb:
-                        wandb.log({
-                            f"pred_len_{c_pred_len}/ade": currentValue,
-                            f"pred_len_{c_pred_len}/fde": fde_,
-                            f"pred_len_{c_pred_len}/loss": loss,
-                        })
+                if self.config.use_wandb:
+                    wandb.log({
+                        f"ade": currentValue,
+                        f"fde": fde_,
+                        f"loss": loss,
+                    })
 
             # 冻结token
             # self.model.rand_token[0, c_pred_len-1].detach().requires_grad_(False)
 
-            # 训练结束,输出最终ADE和FDE
-            self.logger.info("min ADE value: {}".format(minADE))
-            self.logger.info("min FDE value: {}".format(minFDE))
+        # 训练结束,输出最终ADE和FDE
+        self.logger.info("min ADE value: {}".format(minADE))
+        self.logger.info("min FDE value: {}".format(minFDE))
 
     def joint_loss(self, pred):  # pred:[B, 20, 2]  多样性损失
         loss = 0.0
@@ -318,53 +299,54 @@ class Trainer:
             min_des_traj = pred_des[torch.arange(0, len(index_min)), index_min]  # (514, 2)  找到每个轨迹的最小距离的目的地
             destination_prediction = min_des_traj  # (514, 2)  预测的目的地
 
-            # 本次预测的帧id
-            pred_frame_id = [v for v in range((self.config.past_len),(self.config.past_len+c_pred_len))]
-
             # 本次预测的观察帧
             traj_input = past_feat[:, :self.config.past_len]
 
-            # 再根据目的地预测中间的轨
-            # 预测帧token
-            fut_token = self.model.rand_token[0, [v-8 for v in pred_frame_id]].unsqueeze(0)
-            fut_token = repeat(
+            for c_pred_len in range(1, self.config.future_len):
+                # 本次预测的帧id
+                pred_frame_id = [v for v in range((self.config.past_len),(self.config.past_len+c_pred_len))]
+
+                # 预测帧token
+                fut_token = self.model.rand_token[0, [v-8 for v in pred_frame_id]].unsqueeze(0)
+                fut_token = repeat(
                 fut_token, "() n d -> b n d", b=traj_input.size(0)
-            )  # (514, 11, 128)  可学习编码
-            fut_feat = self.model.token_encoder(fut_token)
+                )  # (514, 11, 128)  可学习编码
+                fut_feat = self.model.token_encoder(fut_token)
 
-            # 目的地  训练用真实目的地
-            des = self.model.traj_encoder(destination.squeeze())  # (514, 128) 对预测的目的地进行编码
+                # 目的地  训练用真实目的地
+                des = self.model.traj_encoder(destination.squeeze())  # (514, 128) 对预测的目的地进行编码
 
-            # 拼接 观察帧轨迹 + 可学习编码 + 预测的目的地编码
-            concat_traj_feat = torch.cat((traj_input, fut_feat, des.unsqueeze(1)), 1)  # (514, 10, 128)
-            concat_traj_feat = self.model.get_pe(concat_traj_feat)
-            prediction_feat = self.model.AR_Model(concat_traj_feat, mask_type="all")  # (514, 10, 128)  Transformer  没有用mask
+                # 拼接 观察帧轨迹 + 可学习编码 + 预测的目的地编码
+                concat_traj_feat = torch.cat((traj_input, fut_feat, des.unsqueeze(1)), 1)  # (514, 10, 128)
+                concat_traj_feat = self.model.get_pe(concat_traj_feat)
+                prediction_feat = self.model.AR_Model(concat_traj_feat, mask_type="all")  # (514, 10, 128)  Transformer  没有用mask
 
-            pred_traj = self.model.traj_decoder(prediction_feat[:, self.config.past_len:-1])  # (514, 2)  预测的中间轨迹
+                pred_traj = self.model.traj_decoder(prediction_feat[:, self.config.past_len:-1])  # (514, 2)  预测的中间轨迹
 
-            # 对第19帧进行编码  得到第二十帧的预测轨迹
-            des_prediction = self.model.traj_decoder_20(
-                prediction_feat[:, -1]
-            ) + destination_prediction  # (514, 1, 2)  预测终点的残差
+                # 对第19帧进行编码  得到第二十帧的预测轨迹
+                des_prediction = self.model.traj_decoder_20(
+                    prediction_feat[:, -1]
+                ) + destination_prediction  # (514, 1, 2)  预测终点的残差
 
-            # 拼接预测轨迹
-            pred_results = torch.cat(
-                (pred_traj, des_prediction.unsqueeze(1)), 1
-            )
+                # 拼接预测轨迹
+                pred_results = torch.cat(
+                    (pred_traj, des_prediction.unsqueeze(1)), 1
+                )
 
-            # 计算轨迹损失
-            traj_gt = traj_norm[:, pred_frame_id[0]:pred_frame_id[-1]+1]  # 中间轨迹
-            traj_gt = torch.cat((traj_gt, traj_norm[:, -1].unsqueeze(1)), 1)  # 加上终点
+                # 计算轨迹损失
+                traj_gt = traj_norm[:, pred_frame_id[0]:pred_frame_id[-1]+1]  # 中间轨迹
+                traj_gt = torch.cat((traj_gt, traj_norm[:, -1].unsqueeze(1)), 1)  # 加上终点
 
-            loss += self.criterion(pred_results, traj_gt)
+                loss += self.criterion(pred_results, traj_gt)
 
+
+
+                train_loss += loss.item()
+                count += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), 1.0, norm_type=2
             )
             self.opt.step()
-
-            train_loss += loss.item()
-            count += 1
 
         return train_loss / count

@@ -253,8 +253,8 @@ class Final_Model(nn.Module):
 
         # 用于预测目的地
         self.predictor_Des = MLP(config.n_embd, config.goal_num * 2, (512, 512, 512))
-        self.rand_token = nn.Parameter(torch.rand(
-            1, 12, config.n_embd))  # (1, 12, 128)  可学习编码
+        self.rand_token = nn.Parameter(torch.nn.init.xavier_uniform_(
+            torch.empty(1, 12, config.n_embd)))
         # self.token_encoder = nn.Linear(config.n_embd, config.n_embd)  # 对可学习编码进行编码
         self.token_encoder = MLP(config.n_embd, config.n_embd, (512, 512, 512))
 
@@ -370,7 +370,7 @@ class Final_Model(nn.Module):
         loss_recon = torch.sum(min_distances) / distances.shape[0]
         return loss_recon
 
-    def get_trajectory(self, traj_norm, neis, mask, c_pred_len):
+    def get_trajectory(self, traj_norm, neis, mask):
         predictions = torch.Tensor().cuda()
 
         # 对输入轨迹进行编码
@@ -403,7 +403,7 @@ class Final_Model(nn.Module):
         # generate N=20 future trajectories
         for i in range(self.config.goal_num):
             fut_token = repeat(
-                self.rand_token[:, :c_pred_len], "() n d -> b n d", b=traj_norm.size(0)
+                self.rand_token[:, :-1], "() n d -> b n d", b=traj_norm.size(0)
             )
 
             fut_feat = self.token_encoder(fut_token)
@@ -412,10 +412,10 @@ class Final_Model(nn.Module):
                 (past_feat, fut_feat, des_feat.unsqueeze(1)), 1)  # (512, 20, 128)
 
             traj_feat = self.get_pe(traj_feat)
-            prediction_feat = self.AR_Model(traj_feat, mask_type="all")
+            prediction_feat = self.AR_Model(traj_feat, mask_type="all")  # (512, 20, 128)
 
             mid_prediction = self.traj_decoder(
-                prediction_feat[:, self.past_len:self.past_len+c_pred_len])  # (512, 11, 2)
+                prediction_feat[:, self.past_len:-1])  # (512, 11, 2)
             des_prediction = self.traj_decoder_20(
                 prediction_feat[:, -1]
             ) + pred_des[:, i]
