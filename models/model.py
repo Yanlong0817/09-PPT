@@ -257,6 +257,7 @@ class Final_Model(nn.Module):
             torch.empty(1, 12, config.n_embd)))
         # self.token_encoder = nn.Linear(config.n_embd, config.n_embd)  # 对可学习编码进行编码
         self.token_encoder = MLP(config.n_embd, config.n_embd, (512, 512, 512))
+        self.des_loss_encoder = nn.Linear(config.n_embd, config.n_embd)
 
         # 社交关系
         # self.nei_embedding = nn.Linear(config.vocab_size * self.past_len, config.n_embd)

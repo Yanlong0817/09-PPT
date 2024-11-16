@@ -97,7 +97,8 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.opt, T_max=config.max_epochs, eta_min=config.learning_rate_min
         )
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.SmoothL1Loss()
+        self.criterion_des = nn.MSELoss()
 
         if config.cuda:
             self.model = self.model.cuda()
@@ -291,6 +292,10 @@ class Trainer:
             pred_des = pred_des.view(pred_des.size(0), self.config.goal_num, -1)  # (512, 20, 2)
 
             # 目的地损失
+            true_des_feat = self.model.traj_encoder(destination.squeeze())  # (514, 128) 对预测的目的地进行编码
+            # pred_des_feat = self.model.des_loss_encoder(des_feat[:, -1])  # (514, 128) 对预测的目的地进行编码
+
+            loss += self.criterion_des(des_feat[:, -1], true_des_feat) * self.config.lambda_des
             loss += self.loss_function(pred_des, destination) * self.config.lambda_des
 
             # 从20个预测目的地中找到和真实目的地最接近的目的地
