@@ -293,9 +293,9 @@ class Trainer:
 
             # 目的地损失
             true_des_feat = self.model.traj_encoder(destination.squeeze())  # (514, 128) 对预测的目的地进行编码
-            # pred_des_feat = self.model.des_loss_encoder(des_feat[:, -1])  # (514, 128) 对预测的目的地进行编码
+            pred_des_feat = self.model.des_loss_encoder(des_feat[:, -1])  # (514, 128) 对预测的目的地进行编码
 
-            loss += self.criterion_des(des_feat[:, -1], true_des_feat) * self.config.lambda_des
+            loss += self.criterion_des(pred_des_feat, true_des_feat) * self.config.lambda_des
             loss += self.loss_function(pred_des, destination) * self.config.lambda_des
 
             # 从20个预测目的地中找到和真实目的地最接近的目的地
@@ -344,7 +344,12 @@ class Trainer:
 
                 loss += self.criterion(pred_results, traj_gt)
 
+                # 计算特征损失
+                # middle_feat = prediction_feat[:, self.config.past_len:-1]
+                # middle_gt = traj_norm[:, pred_frame_id[0]:pred_frame_id[-1]+1]
+                # middle_gt_feat = self.model.traj_encoder(middle_gt)
 
+                # loss += self.criterion_des(middle_feat, middle_gt_feat)
 
                 train_loss += loss.item()
                 count += 1
