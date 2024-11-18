@@ -344,13 +344,6 @@ class Trainer:
 
                 loss += self.criterion(pred_results, traj_gt)
 
-                # 计算特征损失
-                # middle_feat = prediction_feat[:, self.config.past_len:-1]
-                # middle_gt = traj_norm[:, pred_frame_id[0]:pred_frame_id[-1]+1]
-                # middle_gt_feat = self.model.traj_encoder(middle_gt)
-
-                # loss += self.criterion_des(middle_feat, middle_gt_feat)
-
                 train_loss += loss.item()
                 count += 1
             loss.backward()
