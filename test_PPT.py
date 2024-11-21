@@ -38,7 +38,7 @@ def parse_config():
     parser.add_argument("--dim_embedding_key", type=int, default=24)
 
     parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument("--model_Pretrain", default='./training/...')
+    parser.add_argument("--model_Pretrain", default='/home/tyl/code/1005idea/09-PPT2/training/sdd/2024.11.17_baseline/model.ckpt')
 
     parser.add_argument("--reproduce", default=False)
 

@@ -2,7 +2,7 @@ import os
 import datetime
 import torch
 import torch.nn as nn
-from models.model_test_trajectory import Final_Model
+from models.model import Final_Model
 from torch.utils.data import DataLoader
 
 from dataset_loader import *
@@ -47,8 +47,8 @@ class Trainer:
         }
 
         # model
-        self.model_Pretrain = torch.load(config.model_Pretrain, map_location=torch.device('cpu')).cuda()
-        self.model = Final_Model(config, self.model_Pretrain)
+        self.model = torch.load(config.model_Pretrain, map_location=torch.device('cpu')).cuda()
+        # self.model = Final_Model(config, self.model_Pretrain)
 
         if config.cuda:
             self.model = self.model.cuda()
@@ -105,7 +105,7 @@ class Trainer:
                 abs_past = trajectory[:, :self.config.past_len, :]
                 initial_pose = trajectory[:, self.config.past_len - 1, :]
 
-                output = self.model(x, neis[:, :self.config.past_len], mask)
+                output = self.model.get_trajectory(x, neis, mask)
                 output = output.data
 
                 future_rep = traj_norm[:, 8:, :].unsqueeze(1).repeat(1, 20, 1, 1)  # (512, 20, 12, 2)
