@@ -146,7 +146,7 @@ class TrajectoryDataset(data.Dataset):
         self.window_size = 3
 
         # <_io.BufferedRandom name='./dataset/sdd_train.pkl'>
-        f = open(dataset_path + dataset_name + "_" + dataset_type + ".pkl", "rb+")
+        f = open(dataset_path + dataset_name + "_" + dataset_type + ".pkl", "rb")
         self.scenario_list = pickle.load(f)
         print(f"The length of scenario_list is {len(self.scenario_list)}")
         f.close()
