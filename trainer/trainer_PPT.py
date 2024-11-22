@@ -260,92 +260,10 @@ class Trainer:
             initial_pose = trajectory[:, self.config.past_len - 1, :]  # 第八帧数据 (512, 2)  未归一化
 
             self.opt.zero_grad()
-
             loss = torch.tensor(0.0, device=self.device)
-
-            # 对输入轨迹进行编码
-            past_state = self.model.traj_encoder(traj_norm)  # (513, 20, 128)
-
-            # 提取社会交互信息
-            int_feat = self.model.spatial_interaction(past_state[:, :self.config.past_len], neis[:, :, :self.config.past_len], mask)  # (512, 8, 128)
-            # past_state[:, :self.config.past_len] = int_feat  # (512, 20, 128)
-
-            # 本次使用的真实值
-            # past_feat = past_state[:, :self.total_len - c_pred_len - 1]
-            past_feat = int_feat
-
-            # 先预测目的地
-            des_token = repeat(
-                self.model.rand_token[:, -1:], "() n d -> b n d", b=past_feat.size(0)
-            )  # (513, 1, 128)  可学习编码
-            des_state = self.model.token_encoder(des_token)  # (513, 1, 128)  对可学习编码进行编码
-
-            # 位置编码
-            des_input = torch.cat((past_feat, des_state), dim=1)
-            des_feat = self.model.get_pe(des_input)
-            des_feat = self.model.AR_Model(
-                des_feat, mask_type="causal"
-            )  # (514, 9, 128)
-            pred_des = self.model.predictor_Des(
-                des_feat[:, -1]
-            )  # generate 20 destinations for each trajectory  (512, 1, 40)  每条轨迹生成20个目的地
-            pred_des = pred_des.view(pred_des.size(0), self.config.goal_num, -1)  # (512, 20, 2)
-
-            # 目的地损失
-            true_des_feat = self.model.traj_encoder(destination.squeeze())  # (514, 128) 对预测的目的地进行编码
-            pred_des_feat = self.model.des_loss_encoder(des_feat[:, -1])  # (514, 128) 对预测的目的地进行编码
-
-            loss += self.criterion_des(pred_des_feat, true_des_feat) * self.config.lambda_des
-            loss += self.loss_function(pred_des, destination) * self.config.lambda_des
-
-            # 从20个预测目的地中找到和真实目的地最接近的目的地
-            distances = torch.norm(destination - pred_des, dim=2)  # (514, 20)  计算每个预测目的地与真实目的地的距离
-            index_min = torch.argmin(distances, dim=1)  # (514)  找到每个轨迹的最小距离的索引
-            min_des_traj = pred_des[torch.arange(0, len(index_min)), index_min]  # (514, 2)  找到每个轨迹的最小距离的目的地
-            destination_prediction = min_des_traj  # (514, 2)  预测的目的地
-
-            # 本次预测的观察帧
-            traj_input = past_feat[:, :self.config.past_len]
-
-            for c_pred_len in range(1, self.config.future_len):
-                # 本次预测的帧id
-                pred_frame_id = [v for v in range((self.config.past_len),(self.config.past_len+c_pred_len))]
-
-                # 预测帧token
-                fut_token = self.model.rand_token[0, [v-8 for v in pred_frame_id]].unsqueeze(0)
-                fut_token = repeat(
-                fut_token, "() n d -> b n d", b=traj_input.size(0)
-                )  # (514, 11, 128)  可学习编码
-                fut_feat = self.model.token_encoder(fut_token)
-
-                # 目的地  训练用真实目的地
-                des = self.model.traj_encoder(destination.squeeze())  # (514, 128) 对预测的目的地进行编码
-
-                # 拼接 观察帧轨迹 + 可学习编码 + 预测的目的地编码
-                concat_traj_feat = torch.cat((traj_input, fut_feat, des.unsqueeze(1)), 1)  # (514, 10, 128)
-                concat_traj_feat = self.model.get_pe(concat_traj_feat)
-                prediction_feat = self.model.AR_Model(concat_traj_feat, mask_type="all")  # (514, 10, 128)  Transformer  没有用mask
-
-                pred_traj = self.model.traj_decoder(prediction_feat[:, self.config.past_len:-1])  # (514, 2)  预测的中间轨迹
-
-                # 对第19帧进行编码  得到第二十帧的预测轨迹
-                des_prediction = self.model.traj_decoder_20(
-                    prediction_feat[:, -1]
-                ) + destination_prediction  # (514, 1, 2)  预测终点的残差
-
-                # 拼接预测轨迹
-                pred_results = torch.cat(
-                    (pred_traj, des_prediction.unsqueeze(1)), 1
-                )
-
-                # 计算轨迹损失
-                traj_gt = traj_norm[:, pred_frame_id[0]:pred_frame_id[-1]+1]  # 中间轨迹
-                traj_gt = torch.cat((traj_gt, traj_norm[:, -1].unsqueeze(1)), 1)  # 加上终点
-
-                loss += self.criterion(pred_results, traj_gt)
-
-                train_loss += loss.item()
-                count += 1
+            loss = self.model(traj_norm, neis, mask, destination)
+            train_loss += loss.item()
+            count += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), 1.0, norm_type=2

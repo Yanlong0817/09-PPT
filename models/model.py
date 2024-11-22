@@ -21,206 +21,9 @@ from models.layer_utils import *
 from scipy import interpolate
 from copy import deepcopy
 
-from models.transformer_encoder import Encoder
+from models.social_encoder import Encoder
 
 # -----------------------------------------------------------------------------
-
-
-class NewGELU(nn.Module):
-    """
-    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT).
-    Reference: Gaussian Error Linear Units (GELU) paper: https://arxiv.org/abs/1606.08415
-    """
-
-    def forward(self, x):
-        return (
-            0.5
-            * x
-            * (
-                1.0
-                + torch.tanh(
-                    math.sqrt(2.0 / math.pi) *
-                    (x + 0.044715 * torch.pow(x, 3.0))
-                )
-            )
-        )
-
-
-class CausalSelfAttention(nn.Module):
-    """
-    A vanilla multi-head masked self-attention layer with a projection at the end.
-    It is possible to use torch.nn.MultiheadAttention here but I am including an
-    explicit implementation here to show that there is nothing too scary here.
-    """
-
-    def __init__(self, config):
-        super().__init__()
-        assert config.n_embd % config.n_head == 0
-        # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
-
-        # qkv
-        self.q_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.k_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.v_proj = nn.Linear(config.n_embd, config.n_embd)
-
-        # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        # regularization
-        self.attn_dropout = nn.Dropout(config.attn_pdrop)
-        self.resid_dropout = nn.Dropout(config.resid_pdrop)
-        # causal mask to ensure that attention is only applied to the left in the input sequence
-        self.register_buffer(
-            "bias",
-            torch.tril(torch.ones(config.block_size, config.block_size)).view(
-                1, 1, config.block_size, config.block_size
-            ),
-        )  # 下三角矩阵,主对角线及以下全为1
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
-
-    def forward(self, x, mask_type="causal", mask_input=None):
-        B, T, C = (
-            x.size()
-        )  # batch size, sequence length, embedding dimensionality (n_embd)
-
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        # q, k, v = self.c_attn(x).split(self.n_embd, dim=2)  # (513, 19, 128)
-
-        q = self.q_proj(x)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
-
-        k = k.view(B, k.size(1), self.n_head, C // self.n_head).transpose(
-            1, 2
-        )  # (B, nh, T, hs)  (513, 4 ,19, 32)
-        q = q.view(B, q.size(1), self.n_head, C // self.n_head).transpose(
-            1, 2
-        )  # (B, nh, T, hs)
-        v = v.view(B, v.size(1), self.n_head, C // self.n_head).transpose(
-            1, 2
-        )  # (B, nh, T, hs)
-
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        att = (q @ k.transpose(-2, -1)) * \
-            (1.0 / math.sqrt(k.size(-1)))  # (513, 4, 19, 19)
-        if mask_input != None:
-            mask = mask_input == 0
-            # print(mask_input[0])
-        elif mask_type == "causal":  # 前三个训练阶段用这个
-            mask = self.bias[:, :, :T, :T] == 0
-        elif mask_type == "all":  # 最后一个阶段用这个
-            self.bias[:, :, :T, :T] = 1
-            mask = self.bias[:, :, :T, :T] == 0
-        else:
-            self.bias[:, :, :T, :T] = 1
-            mask = self.bias[:, :, :T, :T] == 0
-
-        att = att.masked_fill(mask, float("-inf"))
-        att = F.softmax(att, dim=-1)
-        att = self.attn_dropout(att)
-        y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        y = (
-            y.transpose(1, 2).contiguous().view(B, T, C)
-        )  # re-assemble all head outputs side by side  (513, 19, 128)
-
-        # output projection
-        y = self.resid_dropout(self.c_proj(y))
-        return y
-
-
-class Block(nn.Module):
-    """an unassuming Transformer block"""
-
-    def __init__(self, config, pretrain=True):
-        super().__init__()
-        self.ln1 = nn.LayerNorm(config.n_embd)
-        self.ln2 = nn.LayerNorm(config.n_embd)
-        self.attn = CausalSelfAttention(config)  # 自注意力机制
-        self.mlp = nn.Sequential(
-            nn.Linear(config.n_embd, 2 * config.n_embd),
-            nn.GELU(),  # nice
-            nn.Linear(2 * config.n_embd, config.n_embd),
-            nn.Dropout(config.resid_pdrop),
-        )
-        self.dropout = nn.Dropout(config.resid_pdrop)
-
-    def forward(self, x, mask_type="causal", mask_input=None):
-        self.mlp[1].approximate = 'none'  # 自己加,版本不一样,防止报错
-        # TODO: check that training still works
-        x = x + self.dropout(self.attn(self.ln1(x), mask_type,
-                          mask_input))  # 每次进入attn之前都做归一化
-        # x = self.dropout(x)
-        x = x + self.dropout(self.mlp(self.ln2(x)))  # 每次进入mlp之前都做归一化
-        return x
-
-
-class GPT(nn.Module):
-    """GPT Language Model"""
-
-    def __init__(self, config):
-        super().__init__()
-        assert config.vocab_size is not None
-        assert config.block_size is not None
-        self.block_size = config.block_size  # 128
-        params_given = all(
-            [
-                config.int_num_layers_list is not None,
-                config.n_head is not None,
-                config.n_embd is not None,
-            ]
-        )  # 只有这三个值都给定才为True
-
-        assert params_given
-        self.transformer = nn.ModuleDict(
-            dict(
-                wte=nn.Embedding(config.vocab_size, config.n_embd),
-
-                drop=nn.Dropout(config.embd_pdrop),
-                h=nn.ModuleList([Block(config)
-                                for _ in range(config.int_num_layers_list[0])]),
-                ln_f=nn.LayerNorm(config.n_embd),
-            )
-        )
-        # self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        # self.lm_head = MLP(config.n_embd, config.vocab_size, (64,))
-
-        # init all weights, and apply a special scaled init to the residual projections, per GPT-2 paper
-        self.apply(self._init_weights)
-        for pn, p in self.named_parameters():
-            if pn.endswith("c_proj.weight"):
-                torch.nn.init.normal_(
-                    p, mean=0.0, std=0.02 / math.sqrt(2 * config.int_num_layers_list[0])
-                )
-
-        # report number of parameters (note we don't count the decoder parameters in lm_head)
-        n_params = sum(p.numel() for p in self.transformer.parameters())
-        print("number of parameters: %.2fM" % (n_params / 1e6,))
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-        elif isinstance(module, nn.LayerNorm):
-            torch.nn.init.zeros_(module.bias)
-            torch.nn.init.ones_(module.weight)
-
-    def forward(
-        self, input, social=None, targets=None, mask_type="causal", mask_input=None
-    ):
-        x = self.transformer.drop(input)  # (513, 19, 128)
-        for block in self.transformer.h:
-            x = block(x, mask_type, mask_input)
-        output_feat = self.transformer.ln_f(x)  # (513, 19, 128)  对输出做归一化
-        return output_feat
-
-
-EPSILON = np.finfo(np.float32).tiny
-
-
 class Final_Model(nn.Module):
 
     def __init__(self, config):
@@ -429,3 +232,88 @@ class Final_Model(nn.Module):
                 (predictions, prediction_single.unsqueeze(1)), dim=1
             )
         return predictions
+
+    def forward(self, traj_norm, neis, mask, destination):
+        loss = torch.tensor(0.0, device=traj_norm.device)
+        # 对输入轨迹进行编码
+        past_state = self.traj_encoder(traj_norm)  # (513, 20, 128)
+
+        # 提取社会交互信息
+        int_feat = self.spatial_interaction(past_state[:, :self.config.past_len], neis[:, :, :self.config.past_len], mask)  # (512, 8, 128)
+        # past_state[:, :self.config.past_len] = int_feat  # (512, 20, 128)
+
+        # 本次使用的真实值
+        # past_feat = past_state[:, :self.total_len - c_pred_len - 1]
+        past_feat = int_feat
+
+        # 先预测目的地
+        des_token = repeat(
+            self.rand_token[:, -1:], "() n d -> b n d", b=past_feat.size(0)
+        )  # (513, 1, 128)  可学习编码
+        des_state = self.token_encoder(des_token)  # (513, 1, 128)  对可学习编码进行编码
+
+        # 位置编码
+        des_input = torch.cat((past_feat, des_state), dim=1)
+        des_feat = self.get_pe(des_input)
+        des_feat = self.AR_Model(
+            des_feat, mask_type="causal"
+        )  # (514, 9, 128)
+        pred_des = self.predictor_Des(
+            des_feat[:, -1]
+        )  # generate 20 destinations for each trajectory  (512, 1, 40)  每条轨迹生成20个目的地
+        pred_des = pred_des.view(pred_des.size(0), self.config.goal_num, -1)  # (512, 20, 2)
+
+        # 目的地损失
+        true_des_feat = self.traj_encoder(destination.squeeze())  # (514, 128) 对预测的目的地进行编码
+        pred_des_feat = self.des_loss_encoder(des_feat[:, -1])  # (514, 128) 对预测的目的地进行编码
+
+        loss += F.mse_loss(pred_des_feat, true_des_feat) * self.config.lambda_des
+        loss += self.loss_function(pred_des, destination) * self.config.lambda_des
+
+        # 从20个预测目的地中找到和真实目的地最接近的目的地
+        distances = torch.norm(destination - pred_des, dim=2)  # (514, 20)  计算每个预测目的地与真实目的地的距离
+        index_min = torch.argmin(distances, dim=1)  # (514)  找到每个轨迹的最小距离的索引
+        min_des_traj = pred_des[torch.arange(0, len(index_min)), index_min]  # (514, 2)  找到每个轨迹的最小距离的目的地
+        destination_prediction = min_des_traj  # (514, 2)  预测的目的地
+
+        # 本次预测的观察帧
+        traj_input = past_feat[:, :self.config.past_len]
+
+        for c_pred_len in range(1, self.config.future_len):
+            # 本次预测的帧id
+            pred_frame_id = [v for v in range((self.config.past_len),(self.config.past_len+c_pred_len))]
+
+            # 预测帧token
+            fut_token = self.rand_token[0, [v-8 for v in pred_frame_id]].unsqueeze(0)
+            fut_token = repeat(
+            fut_token, "() n d -> b n d", b=traj_input.size(0)
+            )  # (514, 11, 128)  可学习编码
+            fut_feat = self.token_encoder(fut_token)
+
+            # 目的地  训练用真实目的地
+            des = self.traj_encoder(destination.squeeze())  # (514, 128) 对预测的目的地进行编码
+
+            # 拼接 观察帧轨迹 + 可学习编码 + 预测的目的地编码
+            concat_traj_feat = torch.cat((traj_input, fut_feat, des.unsqueeze(1)), 1)  # (514, 10, 128)
+            concat_traj_feat = self.get_pe(concat_traj_feat)
+            prediction_feat = self.AR_Model(concat_traj_feat, mask_type="all")  # (514, 10, 128)  Transformer  没有用mask
+
+            pred_traj = self.traj_decoder(prediction_feat[:, self.config.past_len:-1])  # (514, 2)  预测的中间轨迹
+
+            # 对第19帧进行编码  得到第二十帧的预测轨迹
+            des_prediction = self.traj_decoder_20(
+                prediction_feat[:, -1]
+            ) + destination_prediction  # (514, 1, 2)  预测终点的残差
+
+            # 拼接预测轨迹
+            pred_results = torch.cat(
+                (pred_traj, des_prediction.unsqueeze(1)), 1
+            )
+
+            # 计算轨迹损失
+            traj_gt = traj_norm[:, pred_frame_id[0]:pred_frame_id[-1]+1]  # 中间轨迹
+            traj_gt = torch.cat((traj_gt, traj_norm[:, -1].unsqueeze(1)), 1)  # 加上终点
+
+            loss += F.smooth_l1_loss(pred_results, traj_gt)
+
+        return loss
