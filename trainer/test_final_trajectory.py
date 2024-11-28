@@ -92,9 +92,9 @@ class Trainer:
                     mask.to(self.device),
                     initial_pos.to(self.device),
                 )
-                if self.config.dataset_name == "eth":
-                    ped[:, :, 0] = ped[:, :, 0] * self.config.data_scaling[0]
-                    ped[:, :, 1] = ped[:, :, 1] * self.config.data_scaling[1]
+                # if self.config.dataset_name == "eth":
+                #     ped[:, :, 0] = ped[:, :, 0] * self.config.data_scaling[0]
+                #     ped[:, :, 1] = ped[:, :, 1] * self.config.data_scaling[1]
 
                 traj_norm = ped
                 x = traj_norm[:, :self.config.past_len, :]

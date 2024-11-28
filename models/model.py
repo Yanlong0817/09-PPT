@@ -22,6 +22,9 @@ from scipy import interpolate
 from copy import deepcopy
 
 from models.social_encoder import Encoder
+from PIL import Image
+from torchvision import transforms
+import clip
 
 # -----------------------------------------------------------------------------
 class Final_Model(nn.Module):
@@ -78,6 +81,16 @@ class Final_Model(nn.Module):
         self.traj_decoder_20 = MLP(
             config.n_embd, config.vocab_size, (512, 512, 512)
         )  # trajectory decoder for the 20th trajectory point  第二十帧的预测轨迹
+
+        # 加载图片
+        if config.dataset_name == "sdd":
+            pass
+        else:
+            model, preprocess = clip.load("ViT-B/32")
+            image = preprocess(Image.open(f"scene/{config.dataset_name}.jpg")).unsqueeze(0).cuda()
+            self.img_feat = model.encode_image(image).to(dtype=torch.float32).detach()
+
+        self.img_encoder = nn.Linear(512, config.n_embd)
 
         self._init_weights()
 
@@ -180,9 +193,14 @@ class Final_Model(nn.Module):
         # 对输入轨迹进行编码
         past_state = self.traj_encoder(traj_norm)
 
+        # 融合场景信息
+        img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
+        final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
+
         # 提取社会交互信息
         int_feat = self.spatial_interaction(
             past_state[:, :self.past_len], neis[:, :, :self.past_len], mask)  # (512, 8, 128)
+        int_feat = int_feat + final_img_feat
         past_state[:, :self.past_len] = int_feat  # (512, 20, 128)
 
         # 本次使用的真实值
@@ -199,6 +217,7 @@ class Final_Model(nn.Module):
         des_feat = self.AR_Model(
             des_input
         )  # (514, 9, 128)
+        des_feat = des_feat + final_img_feat
         pred_des = self.predictor_Des(
             des_feat[:, -1]
         )  # generate 20 destinations for each trajectory  (512, 1, 40)  每条轨迹生成20个目的地
@@ -217,6 +236,7 @@ class Final_Model(nn.Module):
 
             traj_feat = self.get_pe(traj_feat)
             prediction_feat = self.AR_Model(traj_feat, mask_type="all")  # (512, 20, 128)
+            prediction_feat = prediction_feat + final_img_feat
 
             mid_prediction = self.traj_decoder(
                 prediction_feat[:, self.past_len:-1])  # (512, 11, 2)
@@ -238,8 +258,13 @@ class Final_Model(nn.Module):
         # 对输入轨迹进行编码
         past_state = self.traj_encoder(traj_norm)  # (513, 20, 128)
 
+        # 融合场景信息
+        img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
+        final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
+
         # 提取社会交互信息
         int_feat = self.spatial_interaction(past_state[:, :self.config.past_len], neis[:, :, :self.config.past_len], mask)  # (512, 8, 128)
+        int_feat = int_feat + final_img_feat
         # past_state[:, :self.config.past_len] = int_feat  # (512, 20, 128)
 
         # 本次使用的真实值
@@ -258,6 +283,7 @@ class Final_Model(nn.Module):
         des_feat = self.AR_Model(
             des_feat, mask_type="causal"
         )  # (514, 9, 128)
+        des_feat = des_feat + final_img_feat
         pred_des = self.predictor_Des(
             des_feat[:, -1]
         )  # generate 20 destinations for each trajectory  (512, 1, 40)  每条轨迹生成20个目的地
@@ -297,7 +323,7 @@ class Final_Model(nn.Module):
             concat_traj_feat = torch.cat((traj_input, fut_feat, des.unsqueeze(1)), 1)  # (514, 10, 128)
             concat_traj_feat = self.get_pe(concat_traj_feat)
             prediction_feat = self.AR_Model(concat_traj_feat, mask_type="all")  # (514, 10, 128)  Transformer  没有用mask
-
+            prediction_feat = prediction_feat + final_img_feat
             pred_traj = self.traj_decoder(prediction_feat[:, self.config.past_len:-1])  # (514, 2)  预测的中间轨迹
 
             # 对第19帧进行编码  得到第二十帧的预测轨迹

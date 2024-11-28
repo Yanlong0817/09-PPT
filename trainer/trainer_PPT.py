@@ -237,9 +237,9 @@ class Trainer:
                 initial_pos.to(self.device),
             )  # (512, 20, 2)  (512, 1, 20, 2)  (512, 1, 1)  (512, 1, 2)
 
-            if self.config.dataset_name == "eth":
-                ped[:, :, 0] = ped[:, :, 0] * self.config.data_scaling[0]
-                ped[:, :, 1] = ped[:, :, 1] * self.config.data_scaling[1]
+            # if self.config.dataset_name == "eth":
+            #     ped[:, :, 0] = ped[:, :, 0] * self.config.data_scaling[0]
+            #     ped[:, :, 1] = ped[:, :, 1] * self.config.data_scaling[1]
 
             scale = torch.randn(ped.shape[0]) * 0.05 + 1
             scale = scale.to(self.device)

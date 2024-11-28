@@ -15,9 +15,9 @@ def evaluate_trajectory(dataset, model: Final_Model, config, device):
                     mask.to(device),
                     initial_pos.to(device),
                 )
-            if config.dataset_name == "eth":
-                ped[:, :, 0] = ped[:, :, 0] * config.data_scaling[0]
-                ped[:, :, 1] = ped[:, :, 1] * config.data_scaling[1]
+            # if config.dataset_name == "eth":
+            #     ped[:, :, 0] = ped[:, :, 0] * config.data_scaling[0]
+            #     ped[:, :, 1] = ped[:, :, 1] * config.data_scaling[1]
 
             traj_norm = ped
             output = model.get_trajectory(traj_norm, neis, mask)
