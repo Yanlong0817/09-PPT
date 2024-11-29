@@ -86,11 +86,16 @@ class Final_Model(nn.Module):
         if config.dataset_name == "sdd":
             pass
         else:
-            model, preprocess = clip.load("ViT-B/32")
-            image = preprocess(Image.open(f"scene/{config.dataset_name}.jpg")).unsqueeze(0).cuda()
+            model, preprocess = clip.load("ViT-L/14")
+            transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            image = transform(Image.open(f"scene/{config.dataset_name}.jpg")).unsqueeze(0).cuda()
             self.img_feat = model.encode_image(image).to(dtype=torch.float32).detach()
 
-        self.img_encoder = nn.Linear(512, config.n_embd)
+        self.img_encoder = nn.Linear(self.img_feat.shape[1], config.n_embd)
 
         self._init_weights()
 
