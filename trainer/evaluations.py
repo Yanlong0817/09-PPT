@@ -8,19 +8,19 @@ def evaluate_trajectory(dataset, model: Final_Model, config, device):
     dict_metrics = {}
 
     with torch.no_grad():
-        for _, (ped, neis, mask, initial_pos) in enumerate(dataset):
+        for _, (ped, neis, mask, initial_pos, scene) in enumerate(dataset):
             ped, neis, mask, initial_pos = (
-                    ped.to(device),
-                    neis.to(device),
-                    mask.to(device),
-                    initial_pos.to(device),
-                )
-            # if config.dataset_name == "eth":
-            #     ped[:, :, 0] = ped[:, :, 0] * config.data_scaling[0]
-            #     ped[:, :, 1] = ped[:, :, 1] * config.data_scaling[1]
+                ped.to(device),
+                neis.to(device),
+                mask.to(device),
+                initial_pos.to(device),
+            )
+            if config.dataset_name == "eth":
+                ped[:, :, 0] = ped[:, :, 0] * config.data_scaling[0]
+                ped[:, :, 1] = ped[:, :, 1] * config.data_scaling[1]
 
             traj_norm = ped
-            output = model.get_trajectory(traj_norm, neis, mask)
+            output = model.get_trajectory(traj_norm, neis, mask, scene)
             output = output.data
             # print(output.shape)
 

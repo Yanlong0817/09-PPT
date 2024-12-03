@@ -83,19 +83,20 @@ class Final_Model(nn.Module):
         )  # trajectory decoder for the 20th trajectory point  第二十帧的预测轨迹
 
         # 加载图片
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
         if config.dataset_name == "sdd":
-            pass
+            self.image_model, preprocess = clip.load("ViT-L/14")
+
         else:
             model, preprocess = clip.load("ViT-L/14")
-            transform = transforms.Compose([
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
-            image = transform(Image.open(f"scene/{config.dataset_name}.jpg")).unsqueeze(0).cuda()
+            image = self.transform(Image.open(f"scene/{config.dataset_name}.jpg")).unsqueeze(0).cuda()
             self.img_feat = model.encode_image(image).to(dtype=torch.float32).detach()
 
-        self.img_encoder = nn.Linear(self.img_feat.shape[1], config.n_embd)
+        self.img_encoder = nn.Linear(768, config.n_embd)
 
         self._init_weights()
 
@@ -192,15 +193,21 @@ class Final_Model(nn.Module):
         loss_recon = torch.sum(min_distances) / distances.shape[0]
         return loss_recon
 
-    def get_trajectory(self, traj_norm, neis, mask):
+    def get_trajectory(self, traj_norm, neis, mask, scene):
         predictions = torch.Tensor().cuda()
 
         # 对输入轨迹进行编码
         past_state = self.traj_encoder(traj_norm)
 
         # 融合场景信息
-        img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
-        final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
+        if self.config.dataset_name != "sdd":
+            img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
+            final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
+        else:
+            scene = scene.to(device=traj_norm.device)
+            img_feat = self.image_model.encode_image(scene).to(dtype=torch.float32).detach()
+            img_feat = self.img_encoder(img_feat).unsqueeze(1)
+            final_img_feat = img_feat
 
         # 提取社会交互信息
         int_feat = self.spatial_interaction(
@@ -258,14 +265,20 @@ class Final_Model(nn.Module):
             )
         return predictions
 
-    def forward(self, traj_norm, neis, mask, destination):
+    def forward(self, traj_norm, neis, mask, destination, scene):
         loss = torch.tensor(0.0, device=traj_norm.device)
         # 对输入轨迹进行编码
         past_state = self.traj_encoder(traj_norm)  # (513, 20, 128)
 
         # 融合场景信息
-        img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
-        final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
+        if self.config.dataset_name != "sdd":
+            img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
+            final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
+        else:
+            scene = scene.to(device=traj_norm.device)
+            img_feat = self.image_model.encode_image(scene).to(dtype=torch.float32)
+            img_feat = self.img_encoder(img_feat).unsqueeze(1).detach()
+            final_img_feat = img_feat
 
         # 提取社会交互信息
         int_feat = self.spatial_interaction(past_state[:, :self.config.past_len], neis[:, :, :self.config.past_len], mask)  # (512, 8, 128)

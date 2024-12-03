@@ -10,7 +10,7 @@
             "args": "${command:pickArgs}"
         },
         {
-            "name": "Python: Train PPT",
+            "name": "Python: Train univ",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/train_PPT.py",
@@ -37,6 +37,39 @@
                 "--gpu",
                 "0",
                 "--use_wandb",
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: Train sdd",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/train_PPT.py",
+            "args": [
+                "--dataset_name",
+                "sdd",
+                "--info",
+                "debug_test",
+                "--max_epochs",
+                "100",
+                "--learning_rate",
+                "0.0015",
+                "--root_path",
+                "2024.10.26",
+                "--wandb_group",
+                "sdd",
+                "--notes",
+                "sdd实验",
+                "--rotation",
+                "True",
+                "--int_num_layers_list",
+                "3",
+                "2",
+                "--gpu",
+                "0",
+                "--use_wandb",
+                "--batch_size",
+                "64"
             ],
             "console": "integratedTerminal"
         }

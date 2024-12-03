@@ -70,12 +70,20 @@ class Trainer:
             smooth=False
         )
 
-        self.train_loader = DataLoader(
-            train_dataset, batch_size=config.batch_size, collate_fn=train_dataset.coll_fn, shuffle=True, num_workers=config.num_workers
-        )
-        self.val_loader = DataLoader(
-            val_dataset, batch_size=config.batch_size, collate_fn=val_dataset.coll_fn, shuffle=False, num_workers=config.num_workers
-        )
+        if config.dataset_name == "sdd_img":
+            self.train_loader = DataLoader(
+                train_dataset, batch_size=config.batch_size, collate_fn=train_dataset.coll_fn_sdd, shuffle=True, num_workers=config.num_workers
+            )
+            self.val_loader = DataLoader(
+                val_dataset, batch_size=config.batch_size, collate_fn=val_dataset.coll_fn_sdd, shuffle=False, num_workers=config.num_workers
+            )
+        else:
+            self.train_loader = DataLoader(
+                train_dataset, batch_size=config.batch_size, collate_fn=train_dataset.coll_fn, shuffle=True, num_workers=config.num_workers
+            )
+            self.val_loader = DataLoader(
+                val_dataset, batch_size=config.batch_size, collate_fn=val_dataset.coll_fn, shuffle=False, num_workers=config.num_workers
+            )
         print("Loaded data!")
 
         if torch.cuda.is_available():  # 设置GPU编号
@@ -229,7 +237,7 @@ class Trainer:
         count = 0
         train_loss = 0.0
 
-        for _, (ped, neis, mask, initial_pos) in enumerate(self.train_loader):
+        for _, (ped, neis, mask, initial_pos, scene) in enumerate(self.train_loader):
             ped, neis, mask, initial_pos = (
                 ped.to(self.device),
                 neis.to(self.device),
@@ -261,7 +269,7 @@ class Trainer:
 
             self.opt.zero_grad()
             loss = torch.tensor(0.0, device=self.device)
-            loss = self.model(traj_norm, neis, mask, destination)
+            loss = self.model(traj_norm, neis, mask, destination, scene)
             train_loss += loss.item()
             count += 1
             loss.backward()
