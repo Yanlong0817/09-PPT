@@ -88,9 +88,10 @@ class Final_Model(nn.Module):
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-        if config.dataset_name == "sdd":
+        if config.dataset_name == "sdd_img":
             self.image_model, preprocess = clip.load("ViT-L/14")
-
+        elif config.dataset_name == "sdd":
+            self.image_model = None
         else:
             model, preprocess = clip.load("ViT-L/14")
             image = self.transform(Image.open(f"scene/{config.dataset_name}.jpg")).unsqueeze(0).cuda()
@@ -149,6 +150,8 @@ class Final_Model(nn.Module):
         nei_embedding = self.nei_embedding(neis)  # (512, 8, 18, 128)
         nei_embedding[:, 0, :] = ped  # (512, 18, 128)
         # nei_embedding = self.get_pe(nei_embedding, if_social=True)
+        temporal_enc = self.build_pos_enc(neis.shape[2]).to(device=neis.device)  # (1, 1, 8, 128)
+        nei_embedding = nei_embedding + temporal_enc  # (512, 8, 8, 128)
         _, n, t, _ = neis.shape
         nei_embeddings = nei_embedding.reshape(neis.shape[0], -1,
                             self.config.n_embd)  # (512, 162, 128)
@@ -193,6 +196,14 @@ class Final_Model(nn.Module):
         loss_recon = torch.sum(min_distances) / distances.shape[0]
         return loss_recon
 
+    def build_pos_enc(self, max_len):
+        pe = torch.zeros(max_len, self.config.n_embd)  # (8, 128)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # (8, 1)
+        div_term = torch.exp(torch.arange(0, self.config.n_embd, 2).float() * (-np.log(10000.0) / self.config.n_embd))  # (64,)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        return pe.unsqueeze(0).unsqueeze(0)  # (1, 1, 8, 128)
+
     def get_trajectory(self, traj_norm, neis, mask, scene):
         predictions = torch.Tensor().cuda()
 
@@ -203,6 +214,8 @@ class Final_Model(nn.Module):
         if self.config.dataset_name != "sdd":
             img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
             final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
+        elif self.config.dataset_name == "sdd":
+            final_img_feat = torch.zeros(neis.shape[0], 1, self.config.n_embd).to(device=traj_norm.device)
         else:
             scene = scene.to(device=traj_norm.device)
             img_feat = self.image_model.encode_image(scene).to(dtype=torch.float32).detach()
@@ -274,6 +287,8 @@ class Final_Model(nn.Module):
         if self.config.dataset_name != "sdd":
             img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
             final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
+        elif self.config.dataset_name == "sdd":
+            final_img_feat = torch.zeros(neis.shape[0], 1, self.config.n_embd).to(device=traj_norm.device)
         else:
             scene = scene.to(device=traj_norm.device)
             img_feat = self.image_model.encode_image(scene).to(dtype=torch.float32)
