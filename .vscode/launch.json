@@ -47,7 +47,7 @@
             "program": "${workspaceFolder}/train_PPT.py",
             "args": [
                 "--dataset_name",
-                "sdd",
+                "sdd_world",
                 "--info",
                 "debug_test",
                 "--max_epochs",

@@ -177,9 +177,14 @@ class Trainer:
             # if (epoch + 1) % 1 == 0 and c_pred_len == self.config.future_len-1:
             if (epoch + 1) % 1 == 0:
                 self.model.eval()
-                fde_, currentValue = evaluate_trajectory(
-                    self.val_loader, self.model, self.config, self.device
-                )
+                if "sdd" in self.config.dataset_name:
+                    fde_, currentValue = evaluate_trajectory_sdd(
+                        self.val_loader, self.model, self.config, self.device
+                    )
+                else:
+                    fde_, currentValue = evaluate_trajectory(
+                        self.val_loader, self.model, self.config, self.device
+                    )
                 self.tb_writer.add_scalar("train/val", currentValue, epoch)
 
                 if 3 * currentValue + fde_ < minValue:

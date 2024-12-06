@@ -92,7 +92,7 @@ class Final_Model(nn.Module):
             self.image_model, preprocess = clip.load("ViT-L/14")
             for param in self.image_model.parameters():
                 param.requires_grad = False
-        elif config.dataset_name == "sdd":
+        elif config.dataset_name == "sdd" or config.dataset_name == "sdd_world":
             self.image_model = None
         else:
             model, preprocess = clip.load("ViT-L/14")
@@ -216,7 +216,7 @@ class Final_Model(nn.Module):
         if "sdd" not in self.config.dataset_name:
             img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
             final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
-        elif self.config.dataset_name == "sdd":
+        elif self.config.dataset_name == "sdd" or self.config.dataset_name == "sdd_world":
             final_img_feat = torch.zeros(neis.shape[0], 1, self.config.n_embd).to(device=traj_norm.device)
         else:
             scene = scene.to(device=traj_norm.device)
@@ -289,7 +289,7 @@ class Final_Model(nn.Module):
         if "sdd" not in self.config.dataset_name:
             img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
             final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
-        elif self.config.dataset_name == "sdd":
+        elif self.config.dataset_name == "sdd" or self.config.dataset_name == "sdd_world":
             final_img_feat = torch.zeros(neis.shape[0], 1, self.config.n_embd).to(device=traj_norm.device)
         else:
             scene = scene.to(device=traj_norm.device)
