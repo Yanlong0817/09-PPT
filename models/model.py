@@ -90,6 +90,8 @@ class Final_Model(nn.Module):
         ])
         if config.dataset_name == "sdd_img":
             self.image_model, preprocess = clip.load("ViT-L/14")
+            for param in self.image_model.parameters():
+                param.requires_grad = False
         elif config.dataset_name == "sdd":
             self.image_model = None
         else:
@@ -211,7 +213,7 @@ class Final_Model(nn.Module):
         past_state = self.traj_encoder(traj_norm)
 
         # 融合场景信息
-        if self.config.dataset_name != "sdd":
+        if "sdd" not in self.config.dataset_name:
             img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
             final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
         elif self.config.dataset_name == "sdd":
@@ -284,7 +286,7 @@ class Final_Model(nn.Module):
         past_state = self.traj_encoder(traj_norm)  # (513, 20, 128)
 
         # 融合场景信息
-        if self.config.dataset_name != "sdd":
+        if "sdd" not in self.config.dataset_name:
             img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
             final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
         elif self.config.dataset_name == "sdd":
@@ -373,6 +375,6 @@ class Final_Model(nn.Module):
             traj_gt = traj_norm[:, pred_frame_id[0]:pred_frame_id[-1]+1]  # 中间轨迹
             traj_gt = torch.cat((traj_gt, traj_norm[:, -1].unsqueeze(1)), 1)  # 加上终点
 
-            loss += F.smooth_l1_loss(pred_results, traj_gt)
+            loss += F.mse_loss(pred_results, traj_gt)
 
         return loss
