@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 
 # from models.model_AIO import model_encdec
-from trainer.evaluations import *
 from models.model import Final_Model
 
 import logging
@@ -70,20 +69,12 @@ class Trainer:
             smooth=False
         )
 
-        if config.dataset_name == "sdd_img":
-            self.train_loader = DataLoader(
-                train_dataset, batch_size=config.batch_size, collate_fn=train_dataset.coll_fn_sdd, shuffle=True, num_workers=config.num_workers
-            )
-            self.val_loader = DataLoader(
-                val_dataset, batch_size=config.batch_size, collate_fn=val_dataset.coll_fn_sdd, shuffle=False, num_workers=config.num_workers
-            )
-        else:
-            self.train_loader = DataLoader(
-                train_dataset, batch_size=config.batch_size, collate_fn=train_dataset.coll_fn, shuffle=True, num_workers=config.num_workers
-            )
-            self.val_loader = DataLoader(
-                val_dataset, batch_size=config.batch_size, collate_fn=val_dataset.coll_fn, shuffle=False, num_workers=config.num_workers
-            )
+        self.train_loader = DataLoader(
+            train_dataset, batch_size=config.batch_size, collate_fn=train_dataset.coll_fn, shuffle=True, num_workers=config.num_workers
+        )
+        self.val_loader = DataLoader(
+            val_dataset, batch_size=config.batch_size, collate_fn=val_dataset.coll_fn, shuffle=False, num_workers=config.num_workers
+        )
         print("Loaded data!")
 
         if torch.cuda.is_available():  # 设置GPU编号
@@ -177,14 +168,7 @@ class Trainer:
             # if (epoch + 1) % 1 == 0 and c_pred_len == self.config.future_len-1:
             if (epoch + 1) % 1 == 0:
                 self.model.eval()
-                if "sdd" in self.config.dataset_name:
-                    fde_, currentValue = evaluate_trajectory_sdd(
-                        self.val_loader, self.model, self.config, self.device
-                    )
-                else:
-                    fde_, currentValue = evaluate_trajectory(
-                        self.val_loader, self.model, self.config, self.device
-                    )
+                fde_, currentValue = self.evaluate_trajectory()
                 self.tb_writer.add_scalar("train/val", currentValue, epoch)
 
                 if 3 * currentValue + fde_ < minValue:
@@ -201,9 +185,6 @@ class Trainer:
                         f"fde": fde_,
                         f"loss": loss,
                     })
-
-            # 冻结token
-            # self.model.rand_token[0, c_pred_len-1].detach().requires_grad_(False)
 
         # 训练结束,输出最终ADE和FDE
         self.logger.info("min ADE value: {}".format(minADE))
@@ -284,3 +265,58 @@ class Trainer:
             self.opt.step()
 
         return train_loss / count
+
+    def evaluate_trajectory(self):
+        # for the fulfillment stage or trajectory stage, we should have a fixed past/intention memory bank.
+        samples = 0
+        dict_metrics = {}
+
+        ADE = []
+        FDE = []
+
+        with torch.no_grad():
+            for _, (ped, neis, mask, initial_pos) in enumerate(self.val_loader):
+                ped, neis, mask, initial_pos = (
+                        ped.to(self.device),
+                        neis.to(self.device),
+                        mask.to(self.device),
+                        initial_pos.to(self.device),
+                    )
+                if self.config.dataset_name == "eth":
+                    ped[:, :, 0] = ped[:, :, 0] * self.config.data_scaling[0]
+                    ped[:, :, 1] = ped[:, :, 1] * self.config.data_scaling[1]
+
+                traj_norm = ped
+                output = self.model.get_trajectory(traj_norm, neis, mask)
+                output = output.data
+                # print(output.shape)
+
+                samples += output.shape[0]
+
+                future_rep = traj_norm[:, 8:-1, :].unsqueeze(1).repeat(1, self.config.goal_num, 1, 1)
+                future_goal = traj_norm[:, -1:, :].unsqueeze(1).repeat(1, self.config.goal_num, 1, 1)
+                future = torch.cat((future_rep, future_goal), dim=2)
+                distances = torch.norm(output - future, dim=3)
+
+                fde_mean_distances = torch.mean(distances[:, :, -1:], dim=2) # find the tarjectory according to the last frame's distance
+                fde_index_min = torch.argmin(fde_mean_distances, dim=1)
+                fde_min_distances = distances[torch.arange(0, len(fde_index_min)), fde_index_min]
+                FDE.append(fde_min_distances[:, -1])
+
+                ade_mean_distances = torch.mean(distances[:, :, :], dim=2) # find the tarjectory according to the last frame's distance
+                ade_index_min = torch.argmin(ade_mean_distances, dim=1)
+                ade_min_distances = distances[torch.arange(0, len(ade_index_min)), ade_index_min]
+                ADE.append(torch.mean(ade_min_distances, dim=1))
+
+        if self.config.dataset_name == "sdd_world":  # 将sdd的世界坐标转化成像素坐标
+            convert = torch.load("convert.ckpt")
+            ADE = torch.cat(ADE) * torch.tensor(convert).to(self.device)
+            FDE = torch.cat(FDE) * torch.tensor(convert).to(self.device)
+        else:
+            ADE = torch.cat(ADE)
+            FDE = torch.cat(FDE)
+
+        dict_metrics['fde_48s'] = FDE.mean() * self.config.divide_coefficient
+        dict_metrics['ade_48s'] = ADE.mean() * self.config.divide_coefficient
+
+        return dict_metrics['fde_48s'], dict_metrics['ade_48s']
