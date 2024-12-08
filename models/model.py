@@ -88,7 +88,9 @@ class Final_Model(nn.Module):
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-        if config.dataset_name == "sdd_img":
+        if not config.use_image:
+            self.image_model = None
+        elif config.dataset_name == "sdd_img":
             self.image_model, preprocess = clip.load("ViT-L/14")
             for param in self.image_model.parameters():
                 param.requires_grad = False
@@ -213,7 +215,9 @@ class Final_Model(nn.Module):
         past_state = self.traj_encoder(traj_norm)
 
         # 融合场景信息
-        if "sdd" not in self.config.dataset_name:
+        if not self.config.use_image:
+            final_img_feat = torch.zeros(neis.shape[0], 1, self.config.n_embd).to(device=traj_norm.device)
+        elif "sdd" not in self.config.dataset_name:
             img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
             final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
         elif self.config.dataset_name == "sdd" or self.config.dataset_name == "sdd_world":
@@ -286,7 +290,10 @@ class Final_Model(nn.Module):
         past_state = self.traj_encoder(traj_norm)  # (513, 20, 128)
 
         # 融合场景信息
-        if "sdd" not in self.config.dataset_name:
+        if not self.config.use_image:
+            final_img_feat = torch.zeros(neis.shape[0], 1, self.config.n_embd).to(device=traj_norm.device)
+            final_img_feat.requires_grad = False
+        elif "sdd" not in self.config.dataset_name:
             img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
             final_img_feat = repeat(img_feat, "() n d -> b n d", b=neis.shape[0])
         elif self.config.dataset_name == "sdd" or self.config.dataset_name == "sdd_world":

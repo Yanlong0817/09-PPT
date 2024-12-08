@@ -23,6 +23,11 @@ def parse_config():
     # 实验结果根路径
     parser.add_argument("--root_path", type=str, required=True, help="实验结果根路径")
 
+    # 是否使用图像
+    parser.add_argument("--use_image", default=False)
+    # 缩放系数
+    parser.add_argument("--divide_coefficient", type=float, default=1)
+
     parser.add_argument("--cuda", default=True)
     # verify the CUDA_VISIBLE_DEVICES
     parser.add_argument("--gpu", type=int, default=0)
