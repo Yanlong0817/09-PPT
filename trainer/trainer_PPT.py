@@ -275,7 +275,7 @@ class Trainer:
         FDE = []
 
         with torch.no_grad():
-            for _, (ped, neis, mask, initial_pos) in enumerate(self.val_loader):
+            for _, (ped, neis, mask, initial_pos, scene) in enumerate(self.val_loader):
                 ped, neis, mask, initial_pos = (
                         ped.to(self.device),
                         neis.to(self.device),
@@ -287,7 +287,7 @@ class Trainer:
                     ped[:, :, 1] = ped[:, :, 1] * self.config.data_scaling[1]
 
                 traj_norm = ped
-                output = self.model.get_trajectory(traj_norm, neis, mask)
+                output = self.model.get_trajectory(traj_norm, neis, mask, scene)
                 output = output.data
                 # print(output.shape)
 
