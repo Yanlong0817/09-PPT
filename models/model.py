@@ -154,8 +154,9 @@ class Final_Model(nn.Module):
         nei_embedding = self.nei_embedding(neis)  # (512, 8, 18, 128)
         nei_embedding[:, 0, :] = ped  # (512, 18, 128)
         # nei_embedding = self.get_pe(nei_embedding, if_social=True)
-        temporal_enc = self.build_pos_enc(neis.shape[2]).to(device=neis.device)  # (1, 1, 8, 128)
-        nei_embedding = nei_embedding + temporal_enc  # (512, 8, 8, 128)
+        if self.config.use_temporal_enc:
+            temporal_enc = self.build_pos_enc(neis.shape[2]).to(device=neis.device)  # (1, 1, 8, 128)
+            nei_embedding = nei_embedding + temporal_enc  # (512, 8, 8, 128)
         _, n, t, _ = neis.shape
         nei_embeddings = nei_embedding.reshape(neis.shape[0], -1,
                             self.config.n_embd)  # (512, 162, 128)

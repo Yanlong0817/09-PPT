@@ -28,6 +28,9 @@ def parse_config():
     # 缩放系数
     parser.add_argument("--divide_coefficient", type=float, default=1)
 
+    # 是否使用时间编码
+    parser.add_argument("--use_temporal_enc", default=False)
+
     parser.add_argument("--cuda", default=True)
     # verify the CUDA_VISIBLE_DEVICES
     parser.add_argument("--gpu", type=int, default=0)
