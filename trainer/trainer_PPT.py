@@ -158,7 +158,7 @@ class Trainer:
         minFDE = 2000
         for epoch in range(self.start_epoch, self.config.max_epochs):
             self.logger.info(" ----- Epoch: {}".format(epoch))
-            loss = self._train_single_epoch(epoch)
+            loss = self._train_single_epoch()
             self.logger.info("Loss: {}".format(loss))
             self.tb_writer.add_scalar("train/loss", loss, epoch)
 
@@ -218,12 +218,12 @@ class Trainer:
         loss = torch.sum(torch.mean(distances, dim=1))
         return loss / distances.shape[0]
 
-    def _train_single_epoch(self, epoch, c_pred_len=12):
+    def _train_single_epoch(self):
         self.model.train()
         count = 0
         train_loss = 0.0
 
-        for _, (ped, neis, mask, initial_pos, scene) in enumerate(self.train_loader):
+        for _, (ped, neis, mask, initial_pos) in enumerate(self.train_loader):
             ped, neis, mask, initial_pos = (
                 ped.to(self.device),
                 neis.to(self.device),
@@ -242,20 +242,11 @@ class Trainer:
             scale = scale.reshape(ped.shape[0], 1, 1, 1)
             neis = neis * scale
 
-            nei_obs = neis[:, :, :self.config.past_len]  # (512, 2, 8, 2)  邻居的观察帧
-
             traj_norm = ped  # 减去第八帧做归一化  (513, 20, 2)
-            x = traj_norm[:, : self.config.past_len, :]  # 前8帧数据 (513, 8, 2)  观察帧
-            destination = traj_norm[:, -1:, :]  # 最后一帧数据 (513, 1, 2)  目的地
-            y = traj_norm[:, self.config.past_len :, :]  # 后12帧数据 (513, 12, 2)  预测帧
-
-            trajectory = traj_norm + initial_pos  # 加上初始位置  (512, 20, 2)
-            abs_past = trajectory[:, : self.config.past_len, :]  # 前8帧数据 (512, 8, 2)  未归一化版本
-            initial_pose = trajectory[:, self.config.past_len - 1, :]  # 第八帧数据 (512, 2)  未归一化
 
             self.opt.zero_grad()
             loss = torch.tensor(0.0, device=self.device)
-            loss = self.model(traj_norm, neis, mask, destination, scene)
+            _, loss = self.model(traj_norm, neis, mask, is_train=True)
             train_loss += loss.item()
             count += 1
             loss.backward()
@@ -275,7 +266,7 @@ class Trainer:
         FDE = []
 
         with torch.no_grad():
-            for _, (ped, neis, mask, initial_pos, scene) in enumerate(self.val_loader):
+            for _, (ped, neis, mask, initial_pos) in enumerate(self.val_loader):
                 ped, neis, mask, initial_pos = (
                         ped.to(self.device),
                         neis.to(self.device),
@@ -287,7 +278,7 @@ class Trainer:
                     ped[:, :, 1] = ped[:, :, 1] * self.config.data_scaling[1]
 
                 traj_norm = ped
-                output = self.model.get_trajectory(traj_norm, neis, mask, scene)
+                output, _ = self.model(traj_norm, neis, mask, is_train=False)
                 output = output.data
                 # print(output.shape)
 

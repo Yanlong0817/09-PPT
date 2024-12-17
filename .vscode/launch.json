@@ -10,6 +10,30 @@
             "args": "${command:pickArgs}"
         },
         {
+            "name": "Train PPT ETH",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/train_PPT.py",
+            "args": [
+                "--dataset_name", "eth",
+                "--info", "baseline",
+                "--max_epochs", "1000",
+                "--learning_rate", "0.0015",
+                "--root_path", "2024.12.14",
+                "--wandb_group", "2024.12.14eth",
+                "--notes", "eth实验",
+                "--rotation", "True",
+                "--int_num_layers_list", "3", "2",
+                "--gpu", "0",
+                "--n_head", "8",
+                "--lambda_j", "0",
+                "--use_image", "True",
+                "--use_wandb",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "Python: Train univ",
             "type": "debugpy",
             "request": "launch",

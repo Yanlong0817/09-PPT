@@ -191,7 +191,7 @@ class TrajectoryDataset(data.Dataset):
         neis = torch.tensor(neis, dtype=torch.float32)
         neis_mask = torch.tensor(neis_mask, dtype=torch.int32)
         shift = torch.tensor(shift, dtype=torch.float32)  # 第八帧数据
-        return ped, neis, neis_mask, shift, None
+        return ped, neis, neis_mask, shift
 
     def coll_fn_sdd(self, scenario_list):
         # batch <list> [[ped, neis]]]
