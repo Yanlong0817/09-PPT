@@ -91,7 +91,6 @@ class Trainer:
             self.model = Final_Model(
                 config=config
             )
-            self.model = torch.load("/home/tyl/code/1005idea/09-PPT/training/zara1/2024.12.18_baseline/model.ckpt")
 
         # 优化器
         self.opt = torch.optim.Adam(
