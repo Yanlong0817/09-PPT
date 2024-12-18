@@ -82,10 +82,16 @@ class Trainer:
 
         self.max_epochs = config.max_epochs
 
+        self.device = torch.device("cuda") if config.cuda else torch.device("cpu")
+
         # Initialize model
-        self.model = Final_Model(
-            config=config
-        )
+        if config.no_train:  # 测试模型
+            self.model = torch.load(config.model_path, map_location=self.device)
+        else:  # 训练模型
+            self.model = Final_Model(
+                config=config
+            )
+            self.model = torch.load("/home/tyl/code/1005idea/09-PPT/training/zara1/2024.12.18_baseline/model.ckpt")
 
         # 优化器
         self.opt = torch.optim.Adam(
@@ -103,7 +109,7 @@ class Trainer:
             self.model = self.model.cuda()
         self.start_epoch = 0
         self.config = config
-        self.device = torch.device("cuda") if config.cuda else torch.device("cpu")
+
 
         self.logger_init()
         if config.use_wandb:
@@ -158,6 +164,7 @@ class Trainer:
         minFDE = 2000
         for epoch in range(self.start_epoch, self.config.max_epochs):
             self.logger.info(" ----- Epoch: {}".format(epoch))
+            self.model.train()
             loss = self._train_single_epoch()
             self.logger.info("Loss: {}".format(loss))
             self.tb_writer.add_scalar("train/loss", loss, epoch)
@@ -247,6 +254,7 @@ class Trainer:
             self.opt.zero_grad()
             loss = torch.tensor(0.0, device=self.device)
             _, loss = self.model(traj_norm, neis, mask, is_train=True)
+            loss = loss.mean()
             train_loss += loss.item()
             count += 1
             loss.backward()
@@ -311,3 +319,7 @@ class Trainer:
         dict_metrics['ade_48s'] = ADE.mean() * self.config.divide_coefficient
 
         return dict_metrics['fde_48s'], dict_metrics['ade_48s']
+
+    def test_model(self):
+        metrics = self.evaluate_trajectory()
+        print(f'ADE: {metrics[1]}, FDE: {metrics[0]}')

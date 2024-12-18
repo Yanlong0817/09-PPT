@@ -21,7 +21,11 @@ def seed_torch(seed=1666):
 def parse_config():
     parser = argparse.ArgumentParser(description="MemoNet with SDD dataset")
     # 实验结果根路径
-    parser.add_argument("--root_path", type=str, required=True, help="实验结果根路径")
+    parser.add_argument("--root_path", type=str, help="实验结果根路径")
+
+    # 训练 or 测试
+    parser.add_argument('--no_train', action='store_true')
+    parser.add_argument('--model_path', type=str, default='')
 
     # 是否使用图像
     parser.add_argument("--use_image", default=False)
@@ -108,7 +112,10 @@ def main(config):
     seed_torch(config.seed)
     t = trainer_ppt.Trainer(config)
     t.logger.info(f"[M] start training modules for {config.dataset_name.upper()} dataset.")
-    t.fit()
+    if config.no_train:
+        t.test_model()  # 测试模型
+    else:
+        t.fit()  # 训练模型
 
 
 if __name__ == "__main__":

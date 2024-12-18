@@ -88,7 +88,7 @@ class Final_Model(nn.Module):
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-        if not config.use_image:
+        if not config.use_image:  # 不使用场景信息
             self.image_model = None
         elif config.dataset_name == "sdd_img":
             self.image_model, preprocess = clip.load("ViT-L/14")
@@ -99,7 +99,8 @@ class Final_Model(nn.Module):
         else:
             model, preprocess = clip.load("ViT-L/14")
             image = self.transform(Image.open(f"scene/{config.dataset_name}.jpg")).unsqueeze(0).cuda()
-            self.img_feat = model.encode_image(image).to(dtype=torch.float32).detach()
+            img_feat = model.encode_image(image).to(dtype=torch.float32).detach()
+            self.register_buffer("img_feat", img_feat)
 
         self.img_encoder = nn.Linear(768, config.n_embd)
 
@@ -151,19 +152,24 @@ class Final_Model(nn.Module):
         # mask (512, 2, 2) is used to stop the attention from invalid agents
 
         # 对邻居进行编码
-        nei_embedding = self.nei_embedding(neis)  # (512, 8, 18, 128)
-        nei_embedding[:, 0, :] = ped  # (512, 18, 128)
+        nei_embedding = self.nei_embedding(neis)  # (512, 18, 8, 128)
+        nei_embedding[:, 0, :] = ped  # (512, 18, 8, 128)
         # nei_embedding = self.get_pe(nei_embedding, if_social=True)
+
+        # 添加时间编码
         if self.config.use_temporal_enc:
             temporal_enc = self.build_pos_enc(neis.shape[2]).to(device=neis.device)  # (1, 1, 8, 128)
-            nei_embedding = nei_embedding + temporal_enc  # (512, 8, 8, 128)
+            nei_embedding = nei_embedding + temporal_enc  # (512, 18, 8, 128)
         _, n, t, _ = neis.shape
         nei_embeddings = nei_embedding.reshape(neis.shape[0], -1,
                             self.config.n_embd)  # (512, 162, 128)
 
+        # 生成social-temporal mask
         mask = mask[:, 0:1].reshape(neis.shape[0], -1, 1).repeat(1, 1, neis.shape[2]).view(neis.shape[0], -1).unsqueeze(1).repeat(1, nei_embeddings.shape[1], 1)  # (512, 1, 9) -> (512, 9, 1) -> (512, 9, 18) -> (512, 162) -> (512, 162, 1) -> (512, 162, 162)
         mask_traj = torch.tril(torch.ones((1, ped.shape[1], ped.shape[1]))).repeat(neis.shape[0], neis.shape[1], neis.shape[1]).to(device=neis.device)  # (512, 162, 162)
         mask = mask * mask_traj  # (512, 162, 162)
+
+        # social-temporal encoder
         int_feat = self.social_decoder(
             nei_embeddings, nei_embeddings, mask
         )  # [B K embed_size]  (512, 112, 128)
@@ -204,21 +210,21 @@ class Final_Model(nn.Module):
     def build_pos_enc(self, max_len):
         pe = torch.zeros(max_len, self.config.n_embd)  # (8, 128)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # (8, 1)
-        div_term = torch.exp(torch.arange(0, self.config.n_embd, 2).float() * (-np.log(10000.0) / self.config.n_embd))  # (64,)
+        div_term = torch.exp(torch.arange(0, self.config.n_embd, 2).float() * (-np.log(100.0) / self.config.n_embd))  # (64,)
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         return pe.unsqueeze(0).unsqueeze(0)  # (1, 1, 8, 128)
 
-    def get_scene_feat(self, traj_norm):
+    def get_scene_feat(self, bs):
         # 融合场景信息
         if not self.config.use_image:  # 不使用场景信息
-            final_img_feat = torch.zeros(traj_norm.shape[0], 1, self.config.n_embd).to(device=traj_norm.device)
+            final_img_feat = torch.zeros(bs, 1, self.config.n_embd)
             final_img_feat.requires_grad = False
-        elif "sdd" not in self.config.dataset_name:  # ETH/UCY
-            img_feat = self.img_encoder(self.img_feat).unsqueeze(1)
-            final_img_feat = repeat(img_feat, "() n d -> b n d", b=traj_norm.shape[0])
-        elif self.config.dataset_name == "sdd" or self.config.dataset_name == "sdd_world":  # SDD
-            final_img_feat = torch.zeros(traj_norm.shape[0], 1, self.config.n_embd).to(device=traj_norm.device)
+        elif self.config.dataset_name in ["eth", 'hotel', 'univ', 'zara1', 'zara2']:  # ETH/UCY
+            img_feat = self.img_encoder(self.img_feat).unsqueeze(1)  # (1, 1, 128)
+            final_img_feat = repeat(img_feat, "() n d -> b n d", b=bs)  # (bs, 1, 128)
+        elif self.config.dataset_name in ["sdd", "sdd_world"]:  # SDD
+            final_img_feat = torch.zeros(bs, 1, self.config.n_embd)
         else:  # 错误的数据集
             raise ValueError(f"Unsupported dataset: {self.config.dataset_name}")
         return final_img_feat
@@ -237,7 +243,7 @@ class Final_Model(nn.Module):
         des_feat = self.AR_Model(
             des_feat, mask_type="causal"
         )  # (514, 9, 128)
-        des_feat = des_feat + final_img_feat
+        des_feat = des_feat + final_img_feat  # 拼接场景信息
         pred_des = self.predictor_Des(
             des_feat[:, -1]
         )  # generate 20 destinations for each trajectory  (512, 1, 40)  每条轨迹生成20个目的地
@@ -263,45 +269,43 @@ class Final_Model(nn.Module):
         predictions = torch.Tensor().cuda()
         loss = torch.tensor(0.0, device=traj_norm.device)
         # 对输入轨迹进行编码
-        past_state = self.traj_encoder(traj_norm)  # (513, 20, 128)
+        past_state = self.traj_encoder(traj_norm)  # (512, 20, 128)
 
         # 获取场景信息
-        final_img_feat = self.get_scene_feat(traj_norm)
+        final_img_feat = self.get_scene_feat(traj_norm.shape[0]).to(device=traj_norm.device)  # (512, 1, 128)
 
         # 提取社会交互信息
         int_feat = self.spatial_interaction(past_state[:, :self.config.past_len], neis[:, :, :self.config.past_len], mask)  # (512, 8, 128)
-        int_feat = int_feat + final_img_feat
-        # past_state[:, :self.config.past_len] = int_feat  # (512, 20, 128)
+        int_feat = int_feat + final_img_feat  # 拼接场景信息
 
         # 本次使用的真实值
-        # past_feat = past_state[:, :self.total_len - c_pred_len - 1]
-        past_feat = int_feat
+        past_feat = int_feat  # (512, 8, 128)
 
         # 获取目的地
-        destination = traj_norm[:, -1:, :]
+        destination = traj_norm[:, -1:, :]  # (512, 1, 2)
         if is_train:
             min_des_traj, des_loss = self.get_des(past_feat, destination, final_img_feat, is_train)
             loss += des_loss
         else:
-            min_des_traj = self.get_des(past_feat, destination, final_img_feat, is_train)
+            min_des_traj = self.get_des(past_feat, destination, final_img_feat, is_train)  # (512, 20, 2)  预测的目的地
 
         destination_prediction = min_des_traj  # (514, 1, 2)  预测的目的地
 
         # 本次预测的观察帧
-        traj_input = past_feat[:, :self.config.past_len]
+        traj_input = past_feat[:, :self.config.past_len]  # (512, 8, 128)
 
         pred_traj_num, pred_len = (1, 1) if is_train else (self.config.goal_num, self.config.future_len - 1)
 
         for i in range(pred_traj_num):  # 训练只预测一条轨迹,测试是二十条
-            for c_pred_len in range(pred_len, self.config.future_len):
+            for k in range(pred_len, self.config.future_len):
                 # 本次预测的帧id
-                pred_frame_id = [v for v in range((self.config.past_len),(self.config.past_len+c_pred_len))]
+                pred_frame_id = [v for v in range((self.config.past_len),(self.config.past_len+k))]
 
                 # 预测帧token
                 fut_token = self.rand_token[0, [v-8 for v in pred_frame_id]].unsqueeze(0)
                 fut_token = repeat(
                 fut_token, "() n d -> b n d", b=traj_input.size(0)
-                )  # (514, 11, 128)  可学习编码
+                )  # (512, k, 128)  可学习编码
                 fut_feat = self.token_encoder(fut_token)
 
                 # 目的地  训练用真实目的地
