@@ -159,13 +159,6 @@ class TrajectoryDataset(data.Dataset):
                 )
                 ped_traj = np.concatenate((ped_traj[: self.obs_len], x), axis=0)
 
-            # if self.scaling:
-            #     scale = np.random.randn(ped_traj.shape[0])*0.05+1
-            #     scale = scale.reshape(ped_traj.shape[0], 1)
-            #     ped_traj = ped_traj * scale
-            #     if neis_traj.shape[0] != 0:
-            #         neis_traj = neis_traj * scale
-
             ped.append(ped_traj)
             neis.append(neis_traj)
 

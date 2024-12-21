@@ -41,18 +41,11 @@ class Final_Model(nn.Module):
         self.future_len = config.future_len  # 12
         self.total_len = self.past_len + self.future_len  # 20
 
-        self.dropout = config.traj_embed_dropout
-
         # 位置编码
         self.wpe=nn.Embedding(config.block_size, config.n_embd)  # 位置编码
 
         # 对输入轨迹进行编码
-        # self.traj_encoder = nn.Linear(config.vocab_size, config.n_embd)  # FC(2, 128)  *********************
-        self.traj_encoder = nn.Sequential(
-            nn.Linear(config.vocab_size, config.n_embd),
-            # nn.ReLU(),
-            # nn.Dropout(self.dropout)
-        )  # FC(2, 128)
+        self.traj_encoder = nn.Linear(config.vocab_size, config.n_embd)  # FC(2, 128)
         self.AR_Model = GPT(config)  # 搭建模型
         self.predictor_1 = nn.Linear(
             config.n_embd, config.vocab_size)  # FC(128, 2)
@@ -286,6 +279,7 @@ class Final_Model(nn.Module):
         if is_train:
             min_des_traj, des_loss = self.get_des(past_feat, destination, final_img_feat, is_train)
             loss += des_loss
+            min_des_traj = destination
         else:
             min_des_traj = self.get_des(past_feat, destination, final_img_feat, is_train)  # (512, 20, 2)  预测的目的地
 

@@ -61,7 +61,6 @@ def parse_config():
     )
     parser.add_argument("--dim_embedding_key", type=int, default=128)
 
-    # Configuration for SDD dataset.
     # 数据集根路径
     parser.add_argument("--dataset_path", type=str, default="/home/tyl/code/1005idea/dataset/")
     # 具体数据名
@@ -79,19 +78,15 @@ def parse_config():
     parser.add_argument('--num_workers', type=int, default=4)
 
     # Transformer Decoder Param
-    parser.add_argument("--n_head", type=int, default=4)
+    parser.add_argument("--n_head", type=int, default=8)
     parser.add_argument("--n_embd", type=int, default=128)
-    parser.add_argument("--int_num_layers_list", type=int, default=[3, 1], nargs='+')
+    parser.add_argument("--int_num_layers_list", type=int, default=[3, 2], nargs='+')
     parser.add_argument("--forward_expansion", type=int, default=2)
     parser.add_argument("--vocab_size", type=int, default=2)
     parser.add_argument("--block_size", type=int, default=128)
     parser.add_argument("--embd_pdrop", type=float, default=0.1)
     parser.add_argument("--resid_pdrop", type=float, default=0.1)
     parser.add_argument("--attn_pdrop", type=float, default=0.1)
-    parser.add_argument("--traj_embed_dropout", type=float, default=0, help="对轨迹编码后的特征进行dropout")
-    # Loss Function
-    parser.add_argument("--loss_function", type=str, default="mse", choices=["mse", "smooth_l1", "huber"])
-    parser.add_argument("--delta", type=float, default=0.5, help="huber loss参数")
 
     parser.add_argument("--lambda_des", type=float, default=30, help="目的地损失权重")
 
