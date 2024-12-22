@@ -54,8 +54,8 @@ class Trainer:
             rotation=config.rotation,
             obs_len=obs_len,
             dist_threshold=config.dist_threshold,
-            smooth=config.smooth,
             use_augmentation=config.use_augmentation,  # 使用数据增强
+            var=config.var,
         )
 
         val_dataset = TrajectoryDataset(
@@ -66,7 +66,7 @@ class Trainer:
             obs_len=obs_len,
             dist_threshold=config.dist_threshold,
             use_augmentation=False,
-            smooth=False
+            var=config.var,
         )
 
         self.train_loader = DataLoader(

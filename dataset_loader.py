@@ -18,22 +18,18 @@ class TrajectoryDataset(data.Dataset):
         dataset_type,
         translation=False,
         rotation=False,
-        scaling=False,
         obs_len=8,
         max_neis_num=50,
         dist_threshold=2,
-        smooth=False,
         use_augmentation=True,
+        var=1,
     ):
         self.translation = translation  # True
         self.rotation = rotation  # True
         self.obs_len = obs_len  # 8
-        self.scaling = scaling  # True
         self.max_neis_num = max_neis_num  # 50
         self.dist_threshold = dist_threshold  # 5
-        self.smooth = smooth  # False
-        self.window_size = 3
-
+        self.var = var
         # <_io.BufferedRandom name='./dataset/sdd_train.pkl'>
         f = open(dataset_path + dataset_name + "_" + dataset_type + ".pkl", "rb")
         self.scenario_list = pickle.load(f)
@@ -146,31 +142,24 @@ class TrajectoryDataset(data.Dataset):
                     rot_mat = np.repeat(rot_mat, neis_traj.shape[0], axis=0)
                     neis_traj = np.matmul(neis_traj, rot_mat)  # 旋转邻居轨迹
 
-            if self.smooth:  # False
-                pred_traj = ped_traj[self.obs_len :]
-                x_len = pred_traj.shape[0]
-                x_list = []
-                keep_num = int(np.floor(self.window_size / 2))
-                for i in range(self.window_size):
-                    x_list.append(pred_traj[i : x_len - self.window_size + 1 + i])
-                x = sum(x_list) / self.window_size
-                x = np.concatenate(
-                    (pred_traj[:keep_num], x, pred_traj[-keep_num:]), axis=0
-                )
-                ped_traj = np.concatenate((ped_traj[: self.obs_len], x), axis=0)
-
             ped.append(ped_traj)
             neis.append(neis_traj)
 
         max_neighbors = max(n_neighbors)  # 当前batch最大邻居数目
         neis_pad = []
         neis_mask = []
-        for neighbor, n in zip(neis, n_neighbors):  # 遍历每个行人的邻居
+        for idx in range(len(ped)):  # 遍历每个行人的邻居
+            neighbor = neis[idx]
+            n = n_neighbors[idx]
+            c_ped = ped[idx]
+            shift_ped = shift[idx]
+
             neis_pad.append(
                 np.pad(neighbor, ((0, max_neighbors - n), (0, 0), (0, 0)), "constant")
             )  # 邻居轨迹填充成相同的长度
+            gaussian_mask = self.get_gaussian_mask(c_ped + shift_ped, neighbor + shift_ped, self.var)
             mask = np.zeros((max_neighbors, max_neighbors))
-            mask[:n, :n] = 1  # mask表示是否有邻居, 若为0表示没有邻居, 是填充值
+            mask[:n, :n] = gaussian_mask  # mask表示是否有邻居, 若为0表示没有邻居, 是填充值
             neis_mask.append(mask)
 
         ped = np.stack(ped, axis=0)  # (512, 20, 2)  512表示batch_size
@@ -182,9 +171,21 @@ class TrajectoryDataset(data.Dataset):
 
         ped = torch.tensor(ped, dtype=torch.float32)
         neis = torch.tensor(neis, dtype=torch.float32)
-        neis_mask = torch.tensor(neis_mask, dtype=torch.int32)
+        neis_mask = torch.tensor(neis_mask, dtype=torch.float32)
         shift = torch.tensor(shift, dtype=torch.float32)  # 第八帧数据
         return ped, neis, neis_mask, shift
+
+    def get_gaussian_mask(self, ped, neis, sigma=1):
+        distance = np.linalg.norm(
+            np.expand_dims(ped, axis=0) - neis, axis=-1
+        )  # (1+N, 20)  计算行人和邻居之间的距离
+        distance = distance[:, : self.obs_len]  # 取出来前八帧的距离  (1+N, 8)
+        distance = np.mean(distance, axis=-1)  # mean distance  取出来和每个邻居的观察帧的平均距离  (1+N, )
+        # distance = distance[:, -1] # final distance
+
+        gaussian_distance = 1/(sigma * np.sqrt(2 * np.pi)) * np.exp(-distance**2 / (2 * sigma**2))
+
+        return gaussian_distance
 
     def coll_fn_sdd(self, scenario_list):
         # batch <list> [[ped, neis]]]
@@ -242,26 +243,6 @@ class TrajectoryDataset(data.Dataset):
                     rot_mat = np.expand_dims(rot_mat, axis=0)
                     rot_mat = np.repeat(rot_mat, neis_traj.shape[0], axis=0)
                     neis_traj = np.matmul(neis_traj, rot_mat)  # 旋转邻居轨迹
-
-            if self.smooth:  # False
-                pred_traj = ped_traj[self.obs_len :]
-                x_len = pred_traj.shape[0]
-                x_list = []
-                keep_num = int(np.floor(self.window_size / 2))
-                for i in range(self.window_size):
-                    x_list.append(pred_traj[i : x_len - self.window_size + 1 + i])
-                x = sum(x_list) / self.window_size
-                x = np.concatenate(
-                    (pred_traj[:keep_num], x, pred_traj[-keep_num:]), axis=0
-                )
-                ped_traj = np.concatenate((ped_traj[: self.obs_len], x), axis=0)
-
-            # if self.scaling:
-            #     scale = np.random.randn(ped_traj.shape[0])*0.05+1
-            #     scale = scale.reshape(ped_traj.shape[0], 1)
-            #     ped_traj = ped_traj * scale
-            #     if neis_traj.shape[0] != 0:
-            #         neis_traj = neis_traj * scale
 
             ped.append(ped_traj)
             neis.append(neis_traj)

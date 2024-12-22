@@ -23,6 +23,8 @@ def parse_config():
     # 实验结果根路径
     parser.add_argument("--root_path", type=str, help="实验结果根路径")
 
+    # mask方差
+    parser.add_argument("--var", type=float, default=1)
     # 训练 or 测试
     parser.add_argument('--no_train', action='store_true')
     parser.add_argument('--model_path', type=str, default='')
@@ -69,7 +71,6 @@ def parse_config():
 
     # 数据增强相关
     parser.add_argument("--use_augmentation", default=False)
-    parser.add_argument("--smooth", default=False)
     parser.add_argument("--rotation", default=False)
 
     # 数据缩放
