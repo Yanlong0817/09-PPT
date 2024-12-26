@@ -158,8 +158,14 @@ class Final_Model(nn.Module):
                             self.config.n_embd)  # (512, 162, 128)
 
         # 生成social-temporal mask
+        # social mask
         mask = mask[:, 0:1].reshape(neis.shape[0], -1, 1).repeat(1, 1, neis.shape[2]).view(neis.shape[0], -1).unsqueeze(1).repeat(1, nei_embeddings.shape[1], 1)  # (512, 1, 9) -> (512, 9, 1) -> (512, 9, 18) -> (512, 162) -> (512, 162, 1) -> (512, 162, 162)
-        mask_traj = torch.tril(torch.ones((1, ped.shape[1], ped.shape[1]))).repeat(neis.shape[0], neis.shape[1], neis.shape[1]).to(device=neis.device)  # (512, 162, 162)
+
+        # temporal mask
+        mask_traj = torch.arange(0, ped.shape[1]).unsqueeze(0).repeat(ped.shape[1], 1) - torch.arange(0, ped.shape[1]).view(-1, 1)
+        mask_traj = 1/(self.config.var * torch.sqrt(torch.tensor(2) * torch.pi)) * torch.exp(-mask_traj**2 / (2 * self.config.var**2))
+        mask_traj = torch.tril(torch.ones((1, ped.shape[1], ped.shape[1]))) * mask_traj
+        mask_traj = mask_traj.repeat(neis.shape[0], neis.shape[1], neis.shape[1]).to(device=neis.device)  # (512, 162, 162)
         mask = mask * mask_traj  # (512, 162, 162)
 
         # social-temporal encoder
